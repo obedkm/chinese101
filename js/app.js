@@ -313,6 +313,100 @@ function buildLesson(unit, li) {
   return ex;
 }
 
+// ---------------------------------------------------------------- AI grammar (DeepSeek)
+// Auto units have no hand-written grammar; DeepSeek generates one micro-lesson per
+// unit in the exact shape the authored grammar engines expect. Generated once,
+// cached in Store.data.aiGrammar, then replayable offline forever.
+const stripHTML = (s) => String(s).replace(/<[^>]*>/g, '').trim();
+
+function validateAIGrammar(o) {
+  const g = {
+    name: stripHTML(o.name).slice(0, 60),
+    intro: stripHTML(o.intro).slice(0, 400),
+    examples: (o.examples || []).slice(0, 2).map(e => ({ cn: stripHTML(e.cn), py: stripHTML(e.py), en: stripHTML(e.en) })),
+    fillBlanks: (o.fillBlanks || []).slice(0, 3).map(fb => ({
+      before: stripHTML(fb.before || ''), after: stripHTML(fb.after || ''),
+      answer: stripHTML(fb.answer), choices: (fb.choices || []).map(stripHTML).slice(0, 3), en: stripHTML(fb.en),
+    })),
+    tiles: (o.tiles || []).slice(0, 2).map(t => ({ parts: (t.parts || []).map(stripHTML), en: stripHTML(t.en) })),
+  };
+  if (!g.name || !g.intro) throw new Error('missing name/intro');
+  if (g.examples.length < 2 || g.examples.some(e => !e.cn || !e.py || !e.en)) throw new Error('bad examples');
+  if (g.fillBlanks.length < 2) throw new Error('need 2+ fillBlanks');
+  g.fillBlanks.forEach(fb => {
+    if (!fb.choices.includes(fb.answer)) fb.choices = [fb.answer, ...fb.choices.filter(c => c && c !== fb.answer)].slice(0, 3);
+    if (fb.choices.length < 2 || !fb.answer || !fb.en) throw new Error('bad fillBlank');
+  });
+  if (g.tiles.length < 1 || g.tiles.some(t => t.parts.length < 2 || t.parts.some(p => !p) || !t.en)) throw new Error('bad tiles');
+  return g;
+}
+
+async function generateAIGrammar(unit) {
+  const words = sample(unit.words, 6).map(id => WORDS[id]).map(w => `${w.cn} (${w.py}) — ${w.en}`).join('\n');
+  const sys = 'You are an expert Chinese teacher writing one micro grammar lesson for an English-speaking learner. Reply with STRICT JSON only.';
+  const usr = `The learner is studying HSK ${unit.hsk}. Some words from the current lesson:
+${words}
+
+Pick ONE genuinely useful grammar pattern at HSK ${unit.hsk} level that can be illustrated with one or more of these words, and produce this exact JSON shape:
+{
+ "name": "pattern name, e.g. 把 sentences — moving the object",
+ "intro": "friendly explanation in English, max 60 words, showing the pattern with Chinese characters",
+ "examples": [{"cn":"chinese sentence","py":"pinyin with tone marks","en":"translation"}, {..}],
+ "fillBlanks": [{"before":"text before blank","after":"text after blank","answer":"the missing word","choices":["answer","wrong1","wrong2"],"en":"sentence translation"}, {..}, {..}],
+ "tiles": [{"parts":["我","已经","吃","了"],"en":"translation of the assembled sentence"}, {..}]
+}
+Rules: sentences use only vocabulary at or below HSK ${unit.hsk}; "answer" MUST be one of "choices"; tiles parts assemble left-to-right into a correct sentence; 2 examples, 3 fillBlanks, 2 tiles.`;
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const text = await AI.chat([{ role: 'system', content: sys }, { role: 'user', content: usr }], { json: true, temperature: 0.5, maxTokens: 1000 });
+    try { return validateAIGrammar(JSON.parse(text)); }
+    catch (e) { lastErr = e; }
+  }
+  throw new Error('AI produced an invalid lesson (' + lastErr.message + ') — try again');
+}
+
+async function startAIGrammar(unitIdx, btn) {
+  const unit = UNITS[unitIdx];
+  let g = D.aiGrammar[unit.id];
+  if (!g) {
+    if (btn) { btn.disabled = true; btn.textContent = '✨ Asking DeepSeek…'; }
+    try { g = await generateAIGrammar(unit); }
+    catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = '✨ Grammar (AI)'; }
+      alert(e.message);
+      return;
+    }
+    D.aiGrammar[unit.id] = g;
+    Store.save();
+  }
+  const ex = [exGrammarIntro(g)];
+  g.fillBlanks.forEach(fb => ex.push(exFillBlank(fb)));
+  g.tiles.forEach(t => ex.push(exTiles(t)));
+  runSession({
+    title: `${unit.title} · AI Grammar`,
+    exercises: ex,
+    onPass() { D.skills.grammar++; SRS.bumpToday(); Store.save(); },
+  });
+}
+
+function explainAnswer(btn, fb, ok, correctText) {
+  btn.disabled = true;
+  btn.textContent = '✨ Thinking…';
+  const q = document.querySelector('#ex-area').innerText.replace(/\s+/g, ' ').slice(0, 400);
+  AI.chat([
+    { role: 'system', content: 'You are a friendly Chinese tutor for an English-speaking beginner. Answer in under 80 words, in English. Write Chinese in characters followed by pinyin in parentheses.' },
+    { role: 'user', content: `Exercise (as shown on screen): ${q}\nCorrect answer: ${correctText || '(shown above)'}\nThe learner answered ${ok ? 'correctly' : 'incorrectly'}. Explain briefly why this is the answer, and give one memorable tip.` },
+  ], { maxTokens: 300, temperature: 0.4 }).then(text => {
+    const d = document.createElement('div');
+    d.className = 'explain-out';
+    d.textContent = text;
+    fb.appendChild(d);
+    btn.remove();
+  }).catch(e => {
+    btn.textContent = '⚠️ ' + e.message.slice(0, 50);
+  });
+}
+
 // Test-out: pass a mixed quiz over the whole previous level to unlock a stage.
 function startTestOut(stageKey) {
   const hsk = +stageKey.slice(3);
@@ -373,6 +467,13 @@ function runSession({ title, exercises, onPass, isCheckpoint }) {
           fb.className = 'feedback ' + (ok ? 'good' : 'bad');
           fb.innerHTML = ok ? `<b>正确! Correct!</b>${correctText ? ' · ' + esc(correctText) : ''}`
                             : `<b>Not quite.</b> ${correctText ? 'Answer: ' + esc(correctText) : ''}`;
+          if (AI.ready()) {
+            const eb = document.createElement('button');
+            eb.className = 'explain-btn';
+            eb.textContent = '✨ Explain';
+            eb.onclick = () => explainAnswer(eb, fb, ok, correctText);
+            fb.appendChild(eb);
+          }
         }
         contBtn.classList.remove('hidden');
         contBtn.focus();
@@ -492,6 +593,8 @@ function unitCard(ui) {
         data-u="${ui}" data-li="${li}" ${canDo || done ? '' : 'disabled'} title="${t.name}">
         <span>${done ? '✓' : t.icon}</span><small>${t.name}</small></button>`;
     }).join('')}</div>
+    ${u.auto && unlocked && AI.ready()
+      ? `<button class="ai-grammar-btn" data-ai="${ui}">✨ ${D.aiGrammar[u.id] ? 'Grammar bite (replay)' : 'Grammar bite (AI)'}</button>` : ''}
   </div>`;
 }
 
@@ -529,6 +632,7 @@ function renderJourney(el) {
     renderScreen();
   });
   el.querySelectorAll('.stage-testout').forEach(b => b.onclick = () => startTestOut(b.dataset.test));
+  el.querySelectorAll('.ai-grammar-btn').forEach(b => b.onclick = () => startAIGrammar(+b.dataset.ai, b));
   el.querySelectorAll('.node:not(.locked)').forEach(n => n.onclick = () => startLesson(+n.dataset.u, +n.dataset.li));
 }
 
@@ -586,11 +690,25 @@ function renderSettings(el) {
       <div class="setting-row">Speech recognition <b>${Speech.canListen() ? '✅ available' : '❌ not available'}</b></div>
     </div>
     <div class="card">
+      <h3 class="card-title">✨ DeepSeek AI (optional)</h3>
+      <input id="ds-key" class="key-input" type="password" autocomplete="off" placeholder="API key (sk-…)" value="${esc(D.settings.deepseekKey || '')}">
+      <div class="setting-row"><span id="ds-status">${AI.ready() ? '✅ key saved on this device' : 'Not configured'}</span>
+        <button class="btn btn-ghost" id="ds-test" ${AI.ready() ? '' : 'disabled'}>Test</button></div>
+      <p class="ai-note">Adds “✨ Grammar bite” lessons to HSK 3–5 units and an “Explain” button on answers. Each unit's grammar is generated once, then stored on the device and replayable offline. Without a key the app works exactly as before.</p>
+    </div>
+    <div class="card">
       <button class="btn btn-danger" id="reset-all">Reset all progress</button>
     </div>
-    <p class="version">Mandarin Journey v0.3 · HSK 1–5 · ${UNITS.length} units · ${Object.keys(WORDS).length} words</p>`;
+    <p class="version">Mandarin Journey v0.4 · HSK 1–5 · ${UNITS.length} units · ${Object.keys(WORDS).length} words</p>`;
   $('#goal-select', el).onchange = (e) => { D.settings.dailyGoal = +e.target.value; Store.save(); };
   $('#test-audio', el).onclick = () => Speech.speak('你好！我们一起学中文吧。');
+  $('#ds-key', el).onchange = (e) => { D.settings.deepseekKey = e.target.value.trim(); Store.save(); renderScreen(); };
+  $('#ds-test', el).onclick = async () => {
+    const s = $('#ds-status', el);
+    s.textContent = 'Testing…';
+    try { await AI.chat([{ role: 'user', content: 'Reply with exactly one word: 好' }], { maxTokens: 8 }); s.textContent = '✅ connection works'; }
+    catch (err) { s.textContent = '❌ ' + err.message.slice(0, 60); }
+  };
   $('#reset-all', el).onclick = () => { if (confirm('Delete ALL progress? This cannot be undone.')) Store.reset(); };
 }
 

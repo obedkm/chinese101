@@ -210,6 +210,12 @@ button { font-family: inherit; cursor: pointer; }
 .transcript { color: var(--muted); font-size: 15px; min-height: 24px; margin-bottom: 12px; }
 
 .feedback { margin: 0 16px 10px; padding: 14px 16px; border-radius: 14px; font-size: 15px; }
+.explain-btn { border: none; background: rgba(255,255,255,.65); border-radius: 999px; padding: 5px 12px; font-size: 13px; margin-left: 8px; }
+.explain-out { margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(0,0,0,.15); font-size: 14px; line-height: 1.5; max-height: 140px; overflow-y: auto; }
+.ai-grammar-btn { width: 100%; margin-top: 10px; border: 2px dashed var(--gold); background: transparent; color: var(--ink); border-radius: 12px; padding: 10px; font-size: 14px; font-weight: 700; }
+.ai-grammar-btn:disabled { opacity: .6; }
+.key-input { width: 100%; font-size: 15px; padding: 10px 12px; border-radius: 10px; border: 2px solid var(--line); margin-bottom: 8px; outline: none; }
+.ai-note { color: var(--muted); font-size: 12.5px; line-height: 1.5; margin-top: 6px; }
 .feedback.good { background: var(--green-soft); color: #23694a; }
 .feedback.bad { background: var(--red-soft); color: var(--primary-dark); }
 

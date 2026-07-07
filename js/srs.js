@@ -2,7 +2,8 @@
 window.Store = (() => {
   const KEY = 'mj_state_v1';
   const DEFAULT = {
-    settings: { dailyGoal: 2 },
+    settings: { dailyGoal: 2, deepseekKey: '' },
+    aiGrammar: {},    // unitId -> generated grammar lesson (cached, replayable offline)
     lessons: {},      // 'u1:0' -> completion timestamp
     daily: {},        // '2026-07-04' -> sessions finished that day
     words: {},        // wordId -> {box, due, right, wrong}

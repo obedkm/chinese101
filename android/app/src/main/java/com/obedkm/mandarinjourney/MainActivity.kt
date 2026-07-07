@@ -14,7 +14,9 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import org.json.JSONObject
+import java.net.URL
 import java.util.Locale
+import javax.net.ssl.HttpsURLConnection
 
 class MainActivity : Activity() {
 
@@ -51,6 +53,30 @@ class MainActivity : Activity() {
             if (!ttsReady) return
             tts?.setSpeechRate(rate.toFloat())
             tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "mj-utterance")
+        }
+
+        // Native HTTPS POST for AI calls — pages loaded from file:// can be blocked
+        // by CORS in the WebView, so JS routes API requests through here instead.
+        @JavascriptInterface
+        fun aiRequest(id: String, url: String, apiKey: String, body: String) {
+            Thread {
+                try {
+                    val conn = URL(url).openConnection() as HttpsURLConnection
+                    conn.requestMethod = "POST"
+                    conn.setRequestProperty("Content-Type", "application/json")
+                    conn.setRequestProperty("Authorization", "Bearer $apiKey")
+                    conn.connectTimeout = 20000
+                    conn.readTimeout = 90000
+                    conn.doOutput = true
+                    conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                    val code = conn.responseCode
+                    val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                        ?.bufferedReader()?.readText() ?: ""
+                    sendAIResult(id, code, text)
+                } catch (e: Exception) {
+                    sendAIResult(id, 0, e.message ?: "network error")
+                }
+            }.start()
         }
 
         @JavascriptInterface
@@ -105,6 +131,13 @@ class MainActivity : Activity() {
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
         recognizer?.startListening(intent)
+    }
+
+    private fun sendAIResult(id: String, status: Int, text: String) {
+        runOnUiThread {
+            webView.evaluateJavascript(
+                "window._mjOnAI && window._mjOnAI(${JSONObject.quote(id)}, $status, ${JSONObject.quote(text)})", null)
+        }
     }
 
     private fun sendSpeechResult(text: String) {
