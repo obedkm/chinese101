@@ -394,12 +394,12 @@ function explainAnswer(btn, fb, ok, correctText) {
   btn.textContent = '✨ Thinking…';
   const q = document.querySelector('#ex-area').innerText.replace(/\s+/g, ' ').slice(0, 400);
   AI.chat([
-    { role: 'system', content: 'You are a friendly Chinese tutor for an English-speaking beginner. Answer in under 80 words, in English. Write Chinese in characters followed by pinyin in parentheses.' },
+    { role: 'system', content: 'You are a friendly Chinese tutor for an English-speaking beginner. Answer in under 80 words, in English, as PLAIN TEXT (no markdown, no asterisks, no headings). Write Chinese in characters followed by pinyin in parentheses.' },
     { role: 'user', content: `Exercise (as shown on screen): ${q}\nCorrect answer: ${correctText || '(shown above)'}\nThe learner answered ${ok ? 'correctly' : 'incorrectly'}. Explain briefly why this is the answer, and give one memorable tip.` },
   ], { maxTokens: 300, temperature: 0.4 }).then(text => {
     const d = document.createElement('div');
     d.className = 'explain-out';
-    d.textContent = text;
+    d.textContent = text.replace(/\*\*|__|^#+\s*/gm, '');
     fb.appendChild(d);
     btn.remove();
   }).catch(e => {
