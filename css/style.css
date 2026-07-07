@@ -88,6 +88,18 @@ button { font-family: inherit; cursor: pointer; }
 .mini-bar.hit { background: var(--gold); }
 
 /* ---------- journey ---------- */
+.stage { margin-bottom: 12px; }
+.stage-head {
+  width: 100%; display: flex; align-items: center; gap: 10px; border: none;
+  background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 14px 16px; margin-bottom: 10px;
+}
+.stage-locked { opacity: .65; }
+.stage-title { font-size: 16px; font-weight: 800; }
+.stage-meta { flex: 1; text-align: right; color: var(--muted); font-size: 12px; }
+.stage-chev { color: var(--muted); font-size: 14px; }
+.stage-testout { width: 100%; margin-bottom: 10px; }
+
 .unit-card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; margin-bottom: 14px; }
 .unit-locked, .unit-coming { opacity: .55; }
 .unit-head { display: flex; align-items: center; gap: 12px; }

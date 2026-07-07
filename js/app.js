@@ -15,9 +15,23 @@ document.addEventListener('click', (e) => {
 });
 
 // ---------------------------------------------------------------- lesson access
+// Auto (word-expansion) units have no hand-written grammar/sentences; their six
+// lessons are generated purely from the word list.
+const AUTO_LESSON_TYPES = [
+  { key: 'vocab',      name: 'Words A',    icon: '🈶' },
+  { key: 'vocab2',     name: 'Words B',    icon: '🈚' },
+  { key: 'hanzi',      name: 'Hanzi',      icon: '✍️' },
+  { key: 'listening',  name: 'Listening',  icon: '👂' },
+  { key: 'speaking',   name: 'Speaking',   icon: '🗣️' },
+  { key: 'checkpoint', name: 'Checkpoint', icon: '🏁' },
+];
+const unitLessonTypes = (unit) => unit.auto ? AUTO_LESSON_TYPES : LESSON_TYPES;
+
 const lessonKey = (unitIdx, li) => UNITS[unitIdx].id + ':' + li;
 const lessonDone = (unitIdx, li) => !!D.lessons[lessonKey(unitIdx, li)];
-const unitUnlocked = (unitIdx) => !UNITS[unitIdx].comingSoon && (unitIdx === 0 || lessonDone(unitIdx - 1, 5));
+const firstOfStage = (ui) => ui === 0 || UNITS[ui - 1].hsk !== UNITS[ui].hsk;
+const unitUnlocked = (ui) => !UNITS[ui].comingSoon &&
+  (ui === 0 || lessonDone(ui - 1, 5) || (firstOfStage(ui) && D.stageUnlocked['hsk' + UNITS[ui].hsk]));
 const lessonUnlocked = (unitIdx, li) => unitUnlocked(unitIdx) && (li === 0 || lessonDone(unitIdx, li - 1));
 
 function nextLesson() {
@@ -37,7 +51,7 @@ function exIntroWord(wordId) {
   return { skill: 'vocab', info: true, render(el, api) {
     el.innerHTML = `<p class="ex-prompt">New word</p>
       <div class="word-card">
-        <div class="word-emoji">${w.emoji}</div>
+        ${w.emoji ? `<div class="word-emoji">${w.emoji}</div>` : ''}
         <div class="hanzi-big">${esc(w.cn)}</div>
         <div class="pinyin">${esc(w.py)}</div>
         <div class="meaning">${esc(w.en)}</div>
@@ -243,33 +257,78 @@ function exSpeak(sentence) {
 }
 
 // ---------------------------------------------------------------- lesson assembly
-function buildLesson(unit, li) {
-  const type = LESSON_TYPES[li].key;
+function vocabBlock(ids, pool) {
   const ex = [];
+  ids.forEach(id => ex.push(exIntroWord(id)));
+  sample(ids, Math.min(8, ids.length)).forEach(id => ex.push(exWordMC(id, pool)));
+  sample(ids, 2).forEach(id => ex.push(exPinyinType(id)));
+  return ex;
+}
+
+function buildLesson(unit, li) {
+  const type = unitLessonTypes(unit)[li].key;
+  const ex = [];
+  const half = Math.ceil(unit.words.length / 2);
   if (type === 'vocab') {
-    unit.words.forEach(id => ex.push(exIntroWord(id)));
-    sample(unit.words, Math.min(8, unit.words.length)).forEach(id => ex.push(exWordMC(id, unit.words)));
-    sample(unit.words, 2).forEach(id => ex.push(exPinyinType(id)));
+    ex.push(...vocabBlock(unit.auto ? unit.words.slice(0, half) : unit.words, unit.words));
+  } else if (type === 'vocab2') {
+    ex.push(...vocabBlock(unit.words.slice(half), unit.words));
   } else if (type === 'hanzi') {
-    unit.hanzi.forEach(c => { ex.push(exHanziLearn(c)); ex.push(exHanziQuiz(c)); });
+    if (unit.hanzi.length) unit.hanzi.forEach(c => { ex.push(exHanziLearn(c)); ex.push(exHanziQuiz(c)); });
+    else sample(unit.words, 6).forEach(id => ex.push(exWordMC(id, unit.words)));
   } else if (type === 'grammar') {
     ex.push(exGrammarIntro(unit.grammar));
     unit.grammar.fillBlanks.forEach(fb => ex.push(exFillBlank(fb)));
     unit.grammar.tiles.forEach(t => ex.push(exTiles(t)));
   } else if (type === 'listening') {
-    unit.sentences.forEach(s => ex.push(exSentenceAudioMC(s, unit)));
-    sample(unit.words, 3).forEach(id => ex.push(exAudioMC(id, unit.words)));
+    if (unit.auto) {
+      sample(unit.words, 6).forEach(id => ex.push(exAudioMC(id, unit.words)));
+      sample(unit.words, 3).forEach(id => ex.push(exPinyinType(id)));
+    } else {
+      unit.sentences.forEach(s => ex.push(exSentenceAudioMC(s, unit)));
+      sample(unit.words, 3).forEach(id => ex.push(exAudioMC(id, unit.words)));
+    }
   } else if (type === 'speaking') {
-    unit.sentences.forEach(s => ex.push(exSpeak(s)));
+    if (unit.auto) {
+      const speakable = unit.words.filter(id => WORDS[id].cn.length >= 2 && !/particle|-ly;/.test(WORDS[id].en));
+      sample(speakable.length >= 4 ? speakable : unit.words, 4).forEach(id => ex.push(exSpeak(WORDS[id])));
+    } else {
+      unit.sentences.forEach(s => ex.push(exSpeak(s)));
+    }
   } else if (type === 'checkpoint') {
-    sample(unit.words, 3).forEach(id => ex.push(exWordMC(id, unit.words)));
-    sample(unit.words, 2).forEach(id => ex.push(exReverseMC(id, unit.words)));
-    ex.push(exFillBlank(sample(unit.grammar.fillBlanks, 1)[0]));
-    ex.push(exTiles(sample(unit.grammar.tiles, 1)[0]));
-    ex.push(exSentenceAudioMC(sample(unit.sentences, 1)[0], unit));
-    sample(unit.words, 1).forEach(id => ex.push(exPinyinType(id)));
+    if (unit.auto) {
+      sample(unit.words, 4).forEach(id => ex.push(exWordMC(id, unit.words)));
+      sample(unit.words, 3).forEach(id => ex.push(exReverseMC(id, unit.words)));
+      sample(unit.words, 2).forEach(id => ex.push(exPinyinType(id)));
+      sample(unit.words, 3).forEach(id => ex.push(exAudioMC(id, unit.words)));
+    } else {
+      sample(unit.words, 3).forEach(id => ex.push(exWordMC(id, unit.words)));
+      sample(unit.words, 2).forEach(id => ex.push(exReverseMC(id, unit.words)));
+      ex.push(exFillBlank(sample(unit.grammar.fillBlanks, 1)[0]));
+      ex.push(exTiles(sample(unit.grammar.tiles, 1)[0]));
+      ex.push(exSentenceAudioMC(sample(unit.sentences, 1)[0], unit));
+      sample(unit.words, 1).forEach(id => ex.push(exPinyinType(id)));
+    }
   }
   return ex;
+}
+
+// Test-out: pass a mixed quiz over the whole previous level to unlock a stage.
+function startTestOut(stageKey) {
+  const hsk = +stageKey.slice(3);
+  const pool = [];
+  UNITS.forEach(u => { if (u.hsk === hsk - 1 && u.words) pool.push(...u.words); });
+  const ex = [];
+  sample(pool, 5).forEach(id => ex.push(exWordMC(id, pool)));
+  sample(pool, 3).forEach(id => ex.push(exReverseMC(id, pool)));
+  sample(pool, 2).forEach(id => ex.push(exPinyinType(id)));
+  sample(pool, 2).forEach(id => ex.push(exAudioMC(id, pool)));
+  runSession({
+    title: `Test out of HSK ${hsk - 1}`,
+    exercises: shuffle(ex),
+    isCheckpoint: true,
+    onPass() { D.stageUnlocked[stageKey] = true; Store.save(); },
+  });
 }
 
 function buildReview(dueIds) {
@@ -346,7 +405,7 @@ function runSession({ title, exercises, onPass, isCheckpoint }) {
 
 function startLesson(unitIdx, li) {
   const unit = UNITS[unitIdx];
-  const t = LESSON_TYPES[li];
+  const t = unitLessonTypes(unit)[li];
   runSession({
     title: `${unit.title} · ${t.name}`,
     exercises: buildLesson(unit, li),
@@ -354,7 +413,8 @@ function startLesson(unitIdx, li) {
     onPass() {
       const first = !D.lessons[lessonKey(unitIdx, li)];
       D.lessons[lessonKey(unitIdx, li)] = Date.now();
-      if (first && D.skills[t.key] !== undefined) D.skills[t.key]++;
+      const sk = t.key === 'vocab2' ? 'vocab' : t.key;
+      if (first && D.skills[sk] !== undefined) D.skills[sk]++;
       SRS.bumpToday();
       Store.save();
     },
@@ -396,8 +456,8 @@ function renderHome(el) {
       </div>
     </div>
     ${nxt ? `<button class="big-btn" id="continue-journey">
-        <span class="big-btn-icon">${LESSON_TYPES[nxt.li].icon}</span>
-        <span class="big-btn-text"><b>Continue journey</b><small>${esc(UNITS[nxt.u].title)} · ${LESSON_TYPES[nxt.li].name}</small></span>
+        <span class="big-btn-icon">${unitLessonTypes(UNITS[nxt.u])[nxt.li].icon}</span>
+        <span class="big-btn-text"><b>Continue journey</b><small>${esc(UNITS[nxt.u].title)} · ${unitLessonTypes(UNITS[nxt.u])[nxt.li].name}</small></span>
         <span class="big-btn-arrow">›</span>
       </button>`
       : '<div class="card">🏆 You finished all available lessons! More units coming in the next update.</div>'}
@@ -415,26 +475,60 @@ function renderHome(el) {
   $('#start-review', el).onclick = startReview;
 }
 
+function unitCard(ui) {
+  const u = UNITS[ui];
+  const unlocked = unitUnlocked(ui);
+  const types = unitLessonTypes(u);
+  const doneCount = [0, 1, 2, 3, 4, 5].filter(li => lessonDone(ui, li)).length;
+  return `<div class="unit-card ${unlocked ? '' : 'unit-locked'}">
+    <div class="unit-head"><span class="unit-icon">${u.icon}</span>
+      <div><h3>${esc(u.title)}</h3><p>${u.words.length} words · ${doneCount}/6 lessons</p></div>
+      ${unlocked ? '' : '<span class="lock">🔒</span>'}</div>
+    <div class="lesson-nodes">${types.map((t, li) => {
+      const done = lessonDone(ui, li);
+      const canDo = lessonUnlocked(ui, li);
+      const current = canDo && !done;
+      return `<button class="node ${done ? 'done' : ''} ${current ? 'current' : ''} ${canDo || done ? '' : 'locked'}"
+        data-u="${ui}" data-li="${li}" ${canDo || done ? '' : 'disabled'} title="${t.name}">
+        <span>${done ? '✓' : t.icon}</span><small>${t.name}</small></button>`;
+    }).join('')}</div>
+  </div>`;
+}
+
+let expandedStage = null;
 function renderJourney(el) {
-  el.innerHTML = `<header class="screen-header"><h1>🗺️ Journey</h1><p class="subtitle">HSK 1 → HSK 2 · one small stop at a time</p></header>` +
-    UNITS.map((u, ui) => {
-      if (u.comingSoon) return `<div class="unit-card unit-coming"><div class="unit-head"><span class="unit-icon">${u.icon}</span><div><h3>${esc(u.title)}</h3><p>Coming soon</p></div><span class="lock">🔒</span></div></div>`;
-      const unlocked = unitUnlocked(ui);
-      const doneCount = [0, 1, 2, 3, 4, 5].filter(li => lessonDone(ui, li)).length;
-      return `<div class="unit-card ${unlocked ? '' : 'unit-locked'}">
-        <div class="unit-head"><span class="unit-icon">${u.icon}</span>
-          <div><h3>${esc(u.title)}</h3><p>HSK ${u.hsk} · ${doneCount}/6 lessons</p></div>
-          ${unlocked ? '' : '<span class="lock">🔒</span>'}</div>
-        <div class="lesson-nodes">${LESSON_TYPES.map((t, li) => {
-          const done = lessonDone(ui, li);
-          const canDo = lessonUnlocked(ui, li);
-          const current = canDo && !done;
-          return `<button class="node ${done ? 'done' : ''} ${current ? 'current' : ''} ${canDo || done ? '' : 'locked'}"
-            data-u="${ui}" data-li="${li}" ${canDo || done ? '' : 'disabled'} title="${t.name}">
-            <span>${done ? '✓' : t.icon}</span><small>${t.name}</small></button>`;
-        }).join('')}</div>
+  const stages = [];
+  UNITS.forEach((u, ui) => {
+    const key = 'hsk' + u.hsk;
+    let s = stages[stages.length - 1];
+    if (!s || s.key !== key) { s = { key, hsk: u.hsk, units: [] }; stages.push(s); }
+    s.units.push(ui);
+  });
+  const nxt = nextLesson();
+  if (expandedStage === null) expandedStage = nxt ? 'hsk' + UNITS[nxt.u].hsk : stages[stages.length - 1].key;
+  el.innerHTML = `<header class="screen-header"><h1>🗺️ Journey</h1><p class="subtitle">HSK 1 → HSK 5 · one small stop at a time</p></header>` +
+    stages.map(s => {
+      const done = s.units.filter(ui => lessonDone(ui, 5)).length;
+      const words = s.units.reduce((n, ui) => n + UNITS[ui].words.length, 0);
+      const unlocked = unitUnlocked(s.units[0]);
+      const open = expandedStage === s.key;
+      return `<div class="stage">
+        <button class="stage-head ${unlocked ? '' : 'stage-locked'}" data-stage="${s.key}">
+          <span class="stage-title">${unlocked ? '' : '🔒 '}HSK ${s.hsk}</span>
+          <span class="stage-meta">${done}/${s.units.length} units · ${words} words</span>
+          <span class="stage-chev">${open ? '▾' : '▸'}</span>
+        </button>
+        <div class="stage-body">
+          ${open && !unlocked && s.hsk > 1 ? `<button class="btn btn-ghost stage-testout" data-test="${s.key}">⚡ Skip ahead — test out of HSK ${s.hsk - 1}</button>` : ''}
+          ${open ? s.units.map(unitCard).join('') : ''}
+        </div>
       </div>`;
     }).join('');
+  el.querySelectorAll('.stage-head').forEach(h => h.onclick = () => {
+    expandedStage = expandedStage === h.dataset.stage ? '' : h.dataset.stage;
+    renderScreen();
+  });
+  el.querySelectorAll('.stage-testout').forEach(b => b.onclick = () => startTestOut(b.dataset.test));
   el.querySelectorAll('.node:not(.locked)').forEach(n => n.onclick = () => startLesson(+n.dataset.u, +n.dataset.li));
 }
 
@@ -494,7 +588,7 @@ function renderSettings(el) {
     <div class="card">
       <button class="btn btn-danger" id="reset-all">Reset all progress</button>
     </div>
-    <p class="version">Mandarin Journey v0.2 · HSK 1 + 2 · 30 units</p>`;
+    <p class="version">Mandarin Journey v0.3 · HSK 1–5 · ${UNITS.length} units · ${Object.keys(WORDS).length} words</p>`;
   $('#goal-select', el).onchange = (e) => { D.settings.dailyGoal = +e.target.value; Store.save(); };
   $('#test-audio', el).onclick = () => Speech.speak('你好！我们一起学中文吧。');
   $('#reset-all', el).onclick = () => { if (confirm('Delete ALL progress? This cannot be undone.')) Store.reset(); };

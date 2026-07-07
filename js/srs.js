@@ -8,6 +8,7 @@ window.Store = (() => {
     words: {},        // wordId -> {box, due, right, wrong}
     hanzi: {},        // char -> true once learned
     skills: { vocab: 0, hanzi: 0, grammar: 0, listening: 0, speaking: 0 },
+    stageUnlocked: {},  // 'hsk3': true — unlocked by passing a test-out quiz
     bestStreak: 0,
   };
 
